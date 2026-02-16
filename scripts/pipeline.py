@@ -178,6 +178,7 @@ def update_status(agent_dir: Path, state: str, error: str | None = None):
     status_path = agent_dir / "status.json"
     status = load_status(agent_dir) or {}
     old_state = status.get("state", "pending")
+    run_id = status.get("run_id", "unknown")
     
     # Validate state transition using state machine if available
     if _ROLE_STATE_ENUM_MAP:
@@ -186,10 +187,10 @@ def update_status(agent_dir: Path, state: str, error: str | None = None):
                 sm = RoleStateMachine(initial_state=_ROLE_STATE_ENUM_MAP[old_state])
                 if not sm.can_transition(_ROLE_STATE_ENUM_MAP[state]):
                     # Log warning but proceed - validation is advisory for backward compatibility
-                    log_line(agent_dir.name, f"WARNING: Invalid role state transition {old_state} -> {state}")
+                    log_line(run_id, f"WARNING: Invalid role state transition {old_state} -> {state}")
         except (StateTransitionError, KeyError, AttributeError) as e:
             # Log specific errors but don't fail - fallback to old behavior
-            log_line(agent_dir.name, f"State machine validation error: {e}")
+            log_line(run_id, f"State machine validation error: {e}")
     
     status["state"] = state
     status["error"] = error
