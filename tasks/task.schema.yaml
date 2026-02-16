@@ -1,0 +1,11 @@
+schema: task
+version: 1
+fields:
+  id: string
+  goal: string
+  scope: list[string]
+  acceptance: list[string]
+  files_touched: list[string]
+  tests: list[string]
+  llm_required: bool
+  model_policy: string

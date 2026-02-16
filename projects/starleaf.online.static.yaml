@@ -1,0 +1,10 @@
+project: starleaf.online.static
+repo: cstarlea/starleaf.online.static
+path: /root/.openclaw/workspace/starleaf.online.static
+default_branch: main
+autopr: true
+deploy: manual_komodo
+model_policy: subagent_policy
+build:
+  commands: []
+  notes: "Static site repo; add build steps if needed."
