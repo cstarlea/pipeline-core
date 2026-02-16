@@ -34,14 +34,19 @@ except ImportError:
 
 MANIFESTS = ROOT / "manifests"
 
-# State machine constants - used when state machine module is not available
+# State machine constants - fallback values when state machine module is not available
+# When FlowState/RoleState are available, use enum values instead
 TERMINAL_FLOW_STATES = {"failed", "archived"}
-ROLE_STATE_MAP = {
-    "pending": "PENDING",
-    "running": "RUNNING",
-    "completed": "COMPLETED",
-    "failed": "FAILED",
-}
+
+# Build role state enum mapping if available
+_ROLE_STATE_ENUM_MAP = None
+if RoleState:
+    _ROLE_STATE_ENUM_MAP = {
+        "pending": RoleState.PENDING,
+        "running": RoleState.RUNNING,
+        "completed": RoleState.COMPLETED,
+        "failed": RoleState.FAILED,
+    }
 
 
 def manifest_path(run_id: str) -> Path:
@@ -170,16 +175,12 @@ def update_status(agent_dir: Path, state: str, error: str | None = None):
     old_state = status.get("state", "pending")
     
     # Validate state transition using state machine if available
-    if RoleStateMachine and RoleState:
+    if _ROLE_STATE_ENUM_MAP and RoleStateMachine:
         try:
-            # Build state map from enum if available
-            state_map = {
-                key: getattr(RoleState, val)
-                for key, val in ROLE_STATE_MAP.items()
-            }
-            if old_state in state_map and state in state_map:
-                sm = RoleStateMachine(initial_state=state_map[old_state])
-                if not sm.can_transition(state_map[state]):
+            if old_state in _ROLE_STATE_ENUM_MAP and state in _ROLE_STATE_ENUM_MAP:
+                sm = RoleStateMachine(initial_state=_ROLE_STATE_ENUM_MAP[old_state])
+                if not sm.can_transition(_ROLE_STATE_ENUM_MAP[state]):
+                    # Log warning but proceed - validation is advisory for backward compatibility
                     log_line(agent_dir.name, f"WARNING: Invalid role state transition {old_state} -> {state}")
         except (StateTransitionError, KeyError, AttributeError) as e:
             # Log specific errors but don't fail - fallback to old behavior
@@ -192,6 +193,7 @@ def update_status(agent_dir: Path, state: str, error: str | None = None):
     if state in ("completed", "failed"):
         status["completed"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     status_path.write_text(json.dumps(status, indent=2))
+
 
 
 def spawn_role(role: dict, run_dir: Path):
