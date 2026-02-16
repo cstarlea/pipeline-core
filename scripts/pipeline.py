@@ -105,6 +105,29 @@ def spawn_role(role: dict, run_dir: Path):
     agent_dir = ensure_agent_workspace(role["id"], run_dir.name)
     write_instructions(agent_dir, role, run_dir)
     update_status(agent_dir, "running")
+
+    prompt = f"""You are a role-specific subagent.
+
+ROLE: {role['id']}
+RUN_ID: {run_dir.name}
+OBJECTIVE: Write the role output for this run.
+
+SCOPE:
+- Allowed files/paths: {run_dir}
+- Do not touch anything else.
+
+DELIVERABLES (required):
+1) Write output to: {run_dir / role['output']}
+2) Write summary to: {agent_dir / 'outbox'}/summary.md
+3) Update {agent_dir / 'status.json'} with state=completed or failed.
+
+RULES:
+- Deterministic first; no unnecessary tool use.
+- If blocked, write a short blocker note in summary.md and set state=failed.
+- Do not message the user.
+"""
+
+    (agent_dir / "inbox" / "spawn_prompt.txt").write_text(prompt)
     return agent_dir
 
 
