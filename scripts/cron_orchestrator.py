@@ -1,28 +1,33 @@
 #!/usr/bin/env python3
 from __future__ import annotations
-import json
 from pathlib import Path
 import subprocess
 
 ROOT = Path('/root/.openclaw/workspace/pipeline-core')
+ORCH_RUNS = ROOT / 'orchestration' / 'runs'
 AGENTS = ROOT / 'agents'
 
 
-def main():
-    # Find latest run folder by mtime
-    runs = [p for p in AGENTS.iterdir() if p.is_dir()]
+def latest_run_id():
+    if not ORCH_RUNS.exists():
+        return None
+    runs = [p for p in ORCH_RUNS.iterdir() if p.is_dir()]
     if not runs:
-        return
+        return None
     runs.sort(key=lambda p: p.stat().st_mtime, reverse=True)
-    run_id = runs[0].name
+    return runs[0].name
+
+
+def main():
+    run_id = latest_run_id()
+    if not run_id:
+        return
 
     # Run orchestrate (writes spawn_request.json when needed)
     subprocess.run(['python3', str(ROOT / 'scripts' / 'pipeline.py'), 'orchestrate', '--run-id', run_id], check=True)
 
-    # If a spawn_request exists, call sessions_spawn via a simple subprocess to a helper (we can't call tools here)
-    # Signal via a file for the main agent to pick up (manual until gateway hook is added)
+    # Mark any spawn_request for cron agent to pick up
     for req in (AGENTS / run_id).glob('*/inbox/spawn_request.json'):
-        # touch a ready marker so the gateway cron can spawn
         ready = req.parent / 'spawn_ready'
         ready.write_text('ready')
 
