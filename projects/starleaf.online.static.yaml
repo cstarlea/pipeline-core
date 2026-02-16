@@ -6,5 +6,8 @@ autopr: true
 deploy: manual_komodo
 model_policy: subagent_policy
 gates:
-  commands: []
-  notes: "Add deterministic test/build commands if needed."
+  commands:
+    - "npx astro check"
+    - "npm run build"
+    - "npm audit --audit-level=high"
+  notes: "Deterministic gates for CI parity."

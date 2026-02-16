@@ -298,6 +298,21 @@ def watchdog(run_id: str, minutes: int):
             log_line(run_id, f"FAILED {role['id']}: stale running ({elapsed:.0f}s)")
 
 
+
+
+def run_gates(run_id: str):
+    # run project gates for a given run id
+    task_path = RUNS / run_id / "task.yaml"
+    if not task_path.exists():
+        raise SystemExit(f"Task not found: {task_path}")
+    task = load_yaml(task_path)
+    project_path = Path(task["path"])
+    project_cfg = load_yaml(ROOT / "projects" / f"{task['project']}.yaml")
+    for cmd in project_cfg.get("gates", {}).get("commands", []):
+        subprocess.run(cmd, shell=True, check=True, cwd=project_path)
+
+
+
 def pr_comment(run_id: str):
     task_path = RUNS / run_id / "task.yaml"
     if not task_path.exists():
@@ -370,6 +385,9 @@ def main():
 
     pc = sp.add_parser("pr-comment")
     pc.add_argument("--run-id", required=True)
+
+    g = sp.add_parser("gates")
+    g.add_argument("--run-id", required=True)
 
     args = p.parse_args()
 
@@ -477,6 +495,10 @@ def main():
 
     if args.cmd == "pr-comment":
         pr_comment(args.run_id)
+        return
+
+    if args.cmd == "gates":
+        run_gates(args.run_id)
         return
 
 
