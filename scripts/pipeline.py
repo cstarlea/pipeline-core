@@ -149,8 +149,16 @@ RULES:
 
     (agent_dir / "inbox" / "spawn_prompt.txt").write_text(prompt)
     # request file for orchestrator cron to spawn
-    req = {"role": role["id"], "run_id": run_dir.name, "agent_dir": str(agent_dir), "prompt": prompt}
-        (agent_dir / "inbox" / "spawn_request.json").write_text(json.dumps(req, indent=2))
+    req = {
+        "role": role["id"],
+        "run_id": run_dir.name,
+        "agent_dir": str(agent_dir),
+        "prompt": prompt,
+        "status_path": str(agent_dir / "status.json"),
+        "summary_path": str(agent_dir / "outbox" / "summary.md"),
+        "output_path": str(run_dir / role["output"]),
+    }
+    (agent_dir / "inbox" / "spawn_request.json").write_text(json.dumps(req, indent=2))
     return agent_dir
 
 
