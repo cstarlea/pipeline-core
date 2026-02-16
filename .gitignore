@@ -1,0 +1,28 @@
+# Run artifacts (generated per run)
+runs/*
+!runs/.gitkeep
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build artifacts
+dist/
+build/
+*.egg-info/
+
+# Manifests (may contain sensitive data)
+manifests/
