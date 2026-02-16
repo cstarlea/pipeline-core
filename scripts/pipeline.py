@@ -3,11 +3,25 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import json
 from pathlib import Path
+import subprocess
+import time
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 RUNS = ROOT / "runs"
+ORCH = ROOT / "orchestration"
+ORCH_RUNS = ORCH / "runs"
+ORCH_LOGS = ORCH / "logs"
+AGENTS = ROOT / "agents"
+ROSTER = ROOT / "roster" / "roles.yaml"
+
+
+def log_line(run_id: str, message: str):
+    ORCH_LOGS.mkdir(parents=True, exist_ok=True)
+    stamp = dt.datetime.now(dt.UTC).isoformat()
+    (ORCH_LOGS / f"{run_id}.log").open("a").write(f"[{stamp}] {message}\n")
 
 
 def load_yaml(path: Path):
@@ -19,6 +33,92 @@ def write_yaml(path: Path, data):
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w") as f:
         yaml.safe_dump(data, f, sort_keys=False)
+
+
+def load_roster():
+    if ROSTER.exists():
+        return yaml.safe_load(ROSTER.read_text()) or {}
+    return {}
+
+
+def ensure_agent_workspace(role_id: str, run_id: str):
+    base = AGENTS / run_id / role_id
+    (base / "inbox").mkdir(parents=True, exist_ok=True)
+    (base / "outbox").mkdir(parents=True, exist_ok=True)
+    (base / "workspace").mkdir(parents=True, exist_ok=True)
+    status_path = base / "status.json"
+    if not status_path.exists():
+        status = {
+            "state": "pending",
+            "started": None,
+            "completed": None,
+            "error": None,
+            "role": role_id,
+            "run_id": run_id,
+        }
+        status_path.write_text(json.dumps(status, indent=2))
+    return base
+
+
+def write_instructions(agent_dir: Path, role: dict, run_dir: Path):
+    instructions = f"""# Task: {role['id']}
+
+## Objective
+Write the role output for this run.
+
+## Run packet
+{run_dir}
+
+## Output file
+{run_dir / role['output']}
+
+## Requirements
+- Read RUN.md and acceptance criteria
+- Only touch files in scope described in RUN.md
+- Write your deliverable to the output file above
+- Write a short summary to outbox/summary.md
+- Update status.json to state=completed when done
+"""
+    (agent_dir / "inbox" / "instructions.md").write_text(instructions)
+
+
+def load_status(agent_dir: Path):
+    status_path = agent_dir / "status.json"
+    if not status_path.exists():
+        return None
+    return json.loads(status_path.read_text())
+
+
+def update_status(agent_dir: Path, state: str, error: str | None = None):
+    status_path = agent_dir / "status.json"
+    status = load_status(agent_dir) or {}
+    status["state"] = state
+    status["error"] = error
+    if state == "running":
+        status["started"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    if state in ("completed", "failed"):
+        status["completed"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    status_path.write_text(json.dumps(status, indent=2))
+
+
+def spawn_role(role: dict, run_dir: Path):
+    agent_dir = ensure_agent_workspace(role["id"], run_dir.name)
+    write_instructions(agent_dir, role, run_dir)
+    update_status(agent_dir, "running")
+    return agent_dir
+
+
+def completion_ok(role: dict, run_dir: Path, agent_dir: Path) -> tuple[bool, str | None]:
+    missing = []
+    output_path = run_dir / role["output"]
+    summary_path = agent_dir / "outbox" / "summary.md"
+    if not output_path.exists():
+        missing.append(str(output_path))
+    if not summary_path.exists():
+        missing.append(str(summary_path))
+    if missing:
+        return False, f"Missing outputs: {', '.join(missing)}"
+    return True, None
 
 
 def task_create(project_path: Path, goal: str, accepts: list[str]):
@@ -48,7 +148,6 @@ def task_create(project_path: Path, goal: str, accepts: list[str]):
     # auto-create orchestration run packet with same run_id
     orch_script = ROOT / "orchestration" / "run_packet.py"
     if orch_script.exists():
-        import subprocess
         subprocess.run([
             "python3",
             str(orch_script),
@@ -59,6 +158,133 @@ def task_create(project_path: Path, goal: str, accepts: list[str]):
         ], check=True)
 
     print(run_dir)
+
+
+def orchestrate(run_id: str):
+    run_dir = ORCH_RUNS / run_id
+    if not run_dir.exists():
+        raise SystemExit(f"Run not found: {run_dir}")
+
+    roster = load_roster()
+    roles = roster.get("roles", [])
+
+    running_roles = []
+    for role in roles:
+        agent_dir = AGENTS / run_id / role["id"]
+        status = load_status(agent_dir) if agent_dir.exists() else None
+        if status and status.get("state") == "running":
+            running_roles.append(role["id"])
+
+    if len(running_roles) > 1:
+        log_line(run_id, f"ERROR: Multiple roles running: {', '.join(running_roles)}")
+        raise SystemExit("Multiple roles running; aborting orchestrate.")
+
+    for role in roles:
+        agent_dir = AGENTS / run_id / role["id"]
+        status = load_status(agent_dir) if agent_dir.exists() else None
+
+        if status and status.get("state") == "completed":
+            ok, err = completion_ok(role, run_dir, agent_dir)
+            if not ok:
+                update_status(agent_dir, "failed", err)
+                log_line(run_id, f"FAILED {role['id']}: {err}")
+                raise SystemExit(err)
+            continue
+
+        if status and status.get("state") == "failed":
+            log_line(run_id, f"HALT: {role['id']} failed: {status.get('error')}")
+            raise SystemExit(f"Role failed: {role['id']}")
+
+        if status and status.get("state") == "running":
+            log_line(run_id, f"WAIT: {role['id']} still running")
+            return
+
+        # pending or missing: spawn next role
+        agent_dir = spawn_role(role, run_dir)
+        log_line(run_id, f"SPAWN: {role['id']} -> {agent_dir}")
+        return
+
+    log_line(run_id, "DONE: all roles completed")
+
+
+def watchdog(run_id: str, minutes: int):
+    run_dir = ORCH_RUNS / run_id
+    if not run_dir.exists():
+        raise SystemExit(f"Run not found: {run_dir}")
+
+    threshold = minutes * 60
+    now = dt.datetime.now(dt.UTC)
+    roster = load_roster()
+    roles = roster.get("roles", [])
+
+    for role in roles:
+        agent_dir = AGENTS / run_id / role["id"]
+        status = load_status(agent_dir) if agent_dir.exists() else None
+        if not status or status.get("state") != "running":
+            continue
+        started = status.get("started")
+        if not started:
+            update_status(agent_dir, "failed", "Missing started timestamp")
+            log_line(run_id, f"FAILED {role['id']}: missing started timestamp")
+            continue
+        try:
+            started_dt = dt.datetime.fromisoformat(started.replace("Z", "+00:00"))
+        except Exception:
+            update_status(agent_dir, "failed", "Invalid started timestamp")
+            log_line(run_id, f"FAILED {role['id']}: invalid started timestamp")
+            continue
+        elapsed = (now - started_dt).total_seconds()
+        if elapsed > threshold:
+            update_status(agent_dir, "failed", f"Stale running > {minutes} minutes")
+            log_line(run_id, f"FAILED {role['id']}: stale running ({elapsed:.0f}s)")
+
+
+def pr_comment(run_id: str):
+    task_path = RUNS / run_id / "task.yaml"
+    if not task_path.exists():
+        raise SystemExit(f"Task not found: {task_path}")
+    task = load_yaml(task_path)
+
+    run_dir = ORCH_RUNS / run_id
+    checklist_path = run_dir / "CHECKLIST.md"
+    final_path = run_dir / "FINAL.md"
+    if not checklist_path.exists() or not final_path.exists():
+        raise SystemExit("Missing CHECKLIST.md or FINAL.md")
+
+    checklist = checklist_path.read_text().strip()
+    final_text = final_path.read_text().strip()
+
+    repo = task["repo"]
+    branch = f"run/{run_id}"
+    pr_info = subprocess.run(
+        [
+            "gh", "pr", "list",
+            "--repo", repo,
+            "--head", branch,
+            "--json", "number,url",
+            "--jq", ".[0]",
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+
+    if not pr_info or pr_info == "null":
+        raise SystemExit(f"No PR found for head {branch}")
+
+    pr = json.loads(pr_info)
+    body = (
+        f"## Pipeline Run {run_id}\n\n"
+        f"**Objective:** {task['goal']}\n\n"
+        f"### Checklist\n\n{checklist}\n\n"
+        f"### Final Summary\n\n{final_text}\n"
+    )
+
+    subprocess.run(
+        ["gh", "pr", "comment", str(pr["number"]), "--repo", repo, "--body", body],
+        check=True,
+    )
+    log_line(run_id, f"PR COMMENTED: {pr['url']}")
 
 
 def main():
@@ -75,6 +301,16 @@ def main():
 
     a = sp.add_parser("approve")
     a.add_argument("--run-id", required=True)
+
+    o = sp.add_parser("orchestrate")
+    o.add_argument("--run-id", required=True)
+
+    w = sp.add_parser("watchdog")
+    w.add_argument("--run-id", required=True)
+    w.add_argument("--minutes", type=int, default=60)
+
+    pc = sp.add_parser("pr-comment")
+    pc.add_argument("--run-id", required=True)
 
     args = p.parse_args()
 
@@ -101,7 +337,6 @@ def main():
         roster = ROOT / "roster" / "roles.yaml"
         if roster.exists():
             try:
-                import yaml
                 data = yaml.safe_load(roster.read_text()) or {}
                 required = data.get("approval", {}).get("required_outputs", required)
             except Exception:
@@ -124,7 +359,6 @@ def main():
 
         # deterministic gates
         for cmd in project_cfg.get("gates", {}).get("commands", []):
-            import subprocess
             subprocess.run(cmd, shell=True, check=True, cwd=project_path)
 
         # check orchestration approval (CHECKLIST all checked)
@@ -135,7 +369,6 @@ def main():
             approved = "- [ ]" not in text
 
         # git diff
-        import subprocess
         diff = subprocess.run(["git", "status", "--porcelain"], cwd=project_path, capture_output=True, text=True, check=True).stdout.strip()
 
         if not diff:
@@ -158,6 +391,18 @@ def main():
             print(f"PR opened for {run_id}.")
         else:
             print(f"Branch pushed for {run_id}. PR not opened (approved={approved}).")
+        return
+
+    if args.cmd == "orchestrate":
+        orchestrate(args.run_id)
+        return
+
+    if args.cmd == "watchdog":
+        watchdog(args.run_id, args.minutes)
+        return
+
+    if args.cmd == "pr-comment":
+        pr_comment(args.run_id)
         return
 
 

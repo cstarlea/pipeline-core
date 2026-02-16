@@ -16,9 +16,10 @@
 ## Standard pipeline
 1) Define objective + acceptance criteria
 2) Create run packet (RUN.md + briefs)
-3) Execute roles in order (architect → builder/data → qa → docs)
-4) Run deterministic gates (tests/build/health)
-5) Write FINAL.md summary
+3) Execute roles in order using `pipeline.py orchestrate --run-id <run-id>` (one role at a time)
+4) Run `pipeline.py watchdog --run-id <run-id>` to fail stale running roles
+5) Run deterministic gates (tests/build/health)
+6) Write FINAL.md summary
 
 ## Definition of Done
 - All role outputs exist

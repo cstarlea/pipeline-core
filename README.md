@@ -26,4 +26,17 @@ python3 scripts/pipeline.py task-create projects/starleaf.online.static.yaml \
   --accept "<criterion 1>" --accept "<criterion 2>"
 
 python3 scripts/pipeline.py run --task runs/<run-id>/task.yaml
+
+# sequential orchestration (one role at a time)
+python3 scripts/pipeline.py orchestrate --run-id <run-id>
+
+# watchdog for stale running roles
+python3 scripts/pipeline.py watchdog --run-id <run-id> --minutes 60
+
+# post deterministic PR comment from FINAL.md + CHECKLIST
+python3 scripts/pipeline.py pr-comment --run-id <run-id>
 ```
+
+Notes:
+- Orchestrator writes to `orchestration/logs/<run-id>.log`.
+- Roles communicate only via `agents/<run-id>/<role>/{inbox,outbox,status.json}`.
