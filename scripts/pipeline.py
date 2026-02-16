@@ -124,7 +124,7 @@ def update_status(agent_dir: Path, state: str, error: str | None = None):
 def spawn_role(role: dict, run_dir: Path):
     agent_dir = ensure_agent_workspace(role["id"], run_dir.name)
     write_instructions(agent_dir, role, run_dir)
-    update_status(agent_dir, "running")
+    update_status(agent_dir, "pending")
 
     prompt = f"""You are a role-specific subagent.
 
@@ -150,7 +150,7 @@ RULES:
     (agent_dir / "inbox" / "spawn_prompt.txt").write_text(prompt)
     # request file for orchestrator cron to spawn
     req = {"role": role["id"], "run_id": run_dir.name, "agent_dir": str(agent_dir), "prompt": prompt}
-    (agent_dir / "inbox" / "spawn_request.json").write_text(json.dumps(req, indent=2))
+        (agent_dir / "inbox" / "spawn_request.json").write_text(json.dumps(req, indent=2))
     return agent_dir
 
 
