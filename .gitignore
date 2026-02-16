@@ -2,6 +2,9 @@
 runs/*
 !runs/.gitkeep
 
+# Orchestration logs
+orchestration/logs/
+
 # Python cache
 __pycache__/
 *.py[cod]
