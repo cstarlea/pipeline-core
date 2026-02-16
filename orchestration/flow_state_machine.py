@@ -7,7 +7,6 @@ for managing run lifecycle transitions.
 """
 from __future__ import annotations
 from enum import Enum
-from typing import Optional
 
 
 class FlowState(Enum):
