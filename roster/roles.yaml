@@ -16,6 +16,9 @@ roles:
   - id: readme-specialist
     output: 05-release-notes.md
     focus: Docs/README/release notes
+  - id: final-summarizer
+    output: FINAL.md
+    focus: Final summary (changes, deferred, blockers)
 approval:
   checklist_required: true
   required_outputs:
