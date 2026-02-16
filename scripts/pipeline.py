@@ -34,6 +34,15 @@ except ImportError:
 
 MANIFESTS = ROOT / "manifests"
 
+# State machine constants - used when state machine module is not available
+TERMINAL_FLOW_STATES = {"failed", "archived"}
+ROLE_STATE_MAP = {
+    "pending": "PENDING",
+    "running": "RUNNING",
+    "completed": "COMPLETED",
+    "failed": "FAILED",
+}
+
 
 def manifest_path(run_id: str) -> Path:
     MANIFESTS.mkdir(parents=True, exist_ok=True)
@@ -72,7 +81,7 @@ def update_flow_state(run_id: str, manifest: dict, new_state: str) -> dict:
     Returns:
         Updated manifest
     """
-    terminal_states = {"failed", "archived"}
+    terminal_states = TERMINAL_FLOW_STATES
     if FlowState:
         terminal_states = {FlowState.FAILED.value, FlowState.ARCHIVED.value}
     
@@ -163,11 +172,10 @@ def update_status(agent_dir: Path, state: str, error: str | None = None):
     # Validate state transition using state machine if available
     if RoleStateMachine and RoleState:
         try:
+            # Build state map from enum if available
             state_map = {
-                "pending": RoleState.PENDING,
-                "running": RoleState.RUNNING,
-                "completed": RoleState.COMPLETED,
-                "failed": RoleState.FAILED,
+                key: getattr(RoleState, val)
+                for key, val in ROLE_STATE_MAP.items()
             }
             if old_state in state_map and state in state_map:
                 sm = RoleStateMachine(initial_state=state_map[old_state])
@@ -347,7 +355,6 @@ def orchestrate(run_id: str):
         return
 
     # All roles completed - update flow state
-    completed_state = FlowState.COMPLETED.value if FlowState else "completed"
     manifest = update_flow_state(run_id, manifest, completed_state)
     log_line(run_id, "DONE: all roles completed")
 
