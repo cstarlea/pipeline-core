@@ -44,6 +44,20 @@ def task_create(project_path: Path, goal: str, accepts: list[str]):
 
     write_yaml(run_dir / "task.yaml", task)
     (run_dir / "REPORT.md").write_text("# Run Report\n\nPending.\n")
+
+    # auto-create orchestration run packet with same run_id
+    orch_script = ROOT / "orchestration" / "run_packet.py"
+    if orch_script.exists():
+        import subprocess
+        subprocess.run([
+            "python3",
+            str(orch_script),
+            "--objective", goal,
+            "--scope", project["project"],
+            "--run-id", run_id,
+            *sum([["--criterion", c] for c in (accepts or [])], [])
+        ], check=True)
+
     print(run_dir)
 
 
