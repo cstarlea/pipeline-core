@@ -40,3 +40,4 @@ python3 scripts/pipeline.py pr-comment --run-id <run-id>
 Notes:
 - Orchestrator writes to `orchestration/logs/<run-id>.log`.
 - Roles communicate only via `agents/<run-id>/<role>/{inbox,outbox,status.json}`.
+- Final summary is authored by the `final-summarizer` role (no manual edits).
