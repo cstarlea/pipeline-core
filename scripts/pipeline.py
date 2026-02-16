@@ -18,6 +18,26 @@ AGENTS = ROOT / "agents"
 ROSTER = ROOT / "roster" / "roles.yaml"
 
 
+MANIFESTS = ROOT / "manifests"
+
+
+def manifest_path(run_id: str) -> Path:
+    MANIFESTS.mkdir(parents=True, exist_ok=True)
+    return MANIFESTS / f"{run_id}.json"
+
+
+def load_manifest(run_id: str) -> dict:
+    mp = manifest_path(run_id)
+    if mp.exists():
+        return json.loads(mp.read_text())
+    return {"run_id": run_id, "current_role": None, "last_spawned_at": None}
+
+
+def save_manifest(run_id: str, data: dict):
+    mp = manifest_path(run_id)
+    mp.write_text(json.dumps(data, indent=2))
+
+
 def log_line(run_id: str, message: str):
     ORCH_LOGS.mkdir(parents=True, exist_ok=True)
     stamp = dt.datetime.now(dt.UTC).isoformat()
@@ -128,6 +148,9 @@ RULES:
 """
 
     (agent_dir / "inbox" / "spawn_prompt.txt").write_text(prompt)
+    # request file for orchestrator cron to spawn
+    req = {"role": role["id"], "run_id": run_dir.name, "agent_dir": str(agent_dir), "prompt": prompt}
+    (agent_dir / "inbox" / "spawn_request.json").write_text(json.dumps(req, indent=2))
     return agent_dir
 
 
@@ -190,6 +213,7 @@ def orchestrate(run_id: str):
 
     roster = load_roster()
     roles = roster.get("roles", [])
+    manifest = load_manifest(run_id)
 
     running_roles = []
     for role in roles:
@@ -224,6 +248,9 @@ def orchestrate(run_id: str):
 
         # pending or missing: spawn next role
         agent_dir = spawn_role(role, run_dir)
+        manifest["current_role"] = role["id"]
+        manifest["last_spawned_at"] = dt.datetime.now(dt.UTC).isoformat()
+        save_manifest(run_id, manifest)
         log_line(run_id, f"SPAWN: {role['id']} -> {agent_dir}")
         return
 
@@ -239,6 +266,7 @@ def watchdog(run_id: str, minutes: int):
     now = dt.datetime.now(dt.UTC)
     roster = load_roster()
     roles = roster.get("roles", [])
+    manifest = load_manifest(run_id)
 
     for role in roles:
         agent_dir = AGENTS / run_id / role["id"]
