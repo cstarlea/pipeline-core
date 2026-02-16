@@ -36,7 +36,11 @@ MANIFESTS = ROOT / "manifests"
 
 # State machine constants - fallback values when state machine module is not available
 # When FlowState/RoleState are available, use enum values instead
-TERMINAL_FLOW_STATES = {FlowState.FAILED.value, FlowState.ARCHIVED.value} if FlowState else {"failed", "archived"}
+TERMINAL_FLOW_STATES = (
+    {FlowState.FAILED.value, FlowState.COMPLETED.value, FlowState.ARCHIVED.value}
+    if FlowState
+    else {"failed", "completed", "archived"}
+)
 
 # Build role state enum mapping if available
 _ROLE_STATE_ENUM_MAP = None
