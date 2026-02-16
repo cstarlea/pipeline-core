@@ -73,10 +73,39 @@ def main():
     r = sp.add_parser("run")
     r.add_argument("--task", required=True)
 
+    a = sp.add_parser("approve")
+    a.add_argument("--run-id", required=True)
+
     args = p.parse_args()
 
     if args.cmd == "task-create":
         task_create(Path(args.project), args.goal, args.accept)
+        return
+
+    if args.cmd == "approve":
+        run_id = args.run_id
+        run_dir = ROOT / "orchestration" / "runs" / run_id
+        checklist = run_dir / "CHECKLIST.md"
+        if not checklist.exists():
+            raise SystemExit(f"Checklist not found for {run_id}")
+
+        # auto-check when required outputs exist
+        required = [
+            "01-architecture.md",
+            "02-implementation.md",
+            "03-data-notes.md",
+            "04-qa-report.md",
+            "05-release-notes.md",
+            "FINAL.md",
+        ]
+        missing = [f for f in required if not (run_dir / f).exists()]
+        if missing:
+            raise SystemExit(f"Missing required outputs: {', '.join(missing)}")
+
+        text = checklist.read_text()
+        text = text.replace("- [ ]", "- [x]")
+        checklist.write_text(text)
+        print(f"Approved {run_id} (checklist completed).")
         return
 
     if args.cmd == "run":
