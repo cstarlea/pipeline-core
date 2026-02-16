@@ -36,7 +36,7 @@ MANIFESTS = ROOT / "manifests"
 
 # State machine constants - fallback values when state machine module is not available
 # When FlowState/RoleState are available, use enum values instead
-TERMINAL_FLOW_STATES = {"failed", "archived"}
+TERMINAL_FLOW_STATES = {FlowState.FAILED.value, FlowState.ARCHIVED.value} if FlowState else {"failed", "archived"}
 
 # Build role state enum mapping if available
 _ROLE_STATE_ENUM_MAP = None
@@ -47,6 +47,13 @@ if RoleState:
         "completed": RoleState.COMPLETED,
         "failed": RoleState.FAILED,
     }
+
+# Flow state values as module constants to avoid recreation
+FLOW_STATE_CREATED = FlowState.CREATED.value if FlowState else "created"
+FLOW_STATE_PENDING = FlowState.PENDING.value if FlowState else "pending"
+FLOW_STATE_RUNNING = FlowState.RUNNING.value if FlowState else "running"
+FLOW_STATE_COMPLETED = FlowState.COMPLETED.value if FlowState else "completed"
+FLOW_STATE_FAILED = FlowState.FAILED.value if FlowState else "failed"
 
 
 def manifest_path(run_id: str) -> Path:
@@ -59,13 +66,11 @@ def load_manifest(run_id: str) -> dict:
     if mp.exists():
         return json.loads(mp.read_text())
     
-    # Use enum value for consistency
-    initial_state = FlowState.CREATED.value if FlowState else "created"
     return {
         "run_id": run_id,
         "current_role": None,
         "last_spawned_at": None,
-        "flow_state": initial_state,  # Track flow state
+        "flow_state": FLOW_STATE_CREATED,  # Track flow state
     }
 
 
@@ -86,12 +91,8 @@ def update_flow_state(run_id: str, manifest: dict, new_state: str) -> dict:
     Returns:
         Updated manifest
     """
-    terminal_states = TERMINAL_FLOW_STATES
-    if FlowState:
-        terminal_states = {FlowState.FAILED.value, FlowState.ARCHIVED.value}
-    
     current_state = manifest.get("flow_state")
-    if current_state not in terminal_states and current_state != new_state:
+    if current_state not in TERMINAL_FLOW_STATES and current_state != new_state:
         manifest["flow_state"] = new_state
         save_manifest(run_id, manifest)
         log_line(run_id, f"FLOW STATE: {current_state} -> {new_state}")
@@ -175,7 +176,7 @@ def update_status(agent_dir: Path, state: str, error: str | None = None):
     old_state = status.get("state", "pending")
     
     # Validate state transition using state machine if available
-    if _ROLE_STATE_ENUM_MAP and RoleStateMachine:
+    if _ROLE_STATE_ENUM_MAP:
         try:
             if old_state in _ROLE_STATE_ENUM_MAP and state in _ROLE_STATE_ENUM_MAP:
                 sm = RoleStateMachine(initial_state=_ROLE_STATE_ENUM_MAP[old_state])
@@ -298,16 +299,9 @@ def orchestrate(run_id: str):
     roles = roster.get("roles", [])
     manifest = load_manifest(run_id)
     
-    # State constants
-    created_state = FlowState.CREATED.value if FlowState else "created"
-    pending_state = FlowState.PENDING.value if FlowState else "pending"
-    running_state = FlowState.RUNNING.value if FlowState else "running"
-    completed_state = FlowState.COMPLETED.value if FlowState else "completed"
-    failed_state = FlowState.FAILED.value if FlowState else "failed"
-    
     # Update flow state from "created" to "pending" on first orchestrate call
-    if manifest.get("flow_state") == created_state:
-        manifest = update_flow_state(run_id, manifest, pending_state)
+    if manifest.get("flow_state") == FLOW_STATE_CREATED:
+        manifest = update_flow_state(run_id, manifest, FLOW_STATE_PENDING)
 
     running_roles = []
     for role in roles:
@@ -331,14 +325,14 @@ def orchestrate(run_id: str):
                 update_status(agent_dir, "failed", err)
                 log_line(run_id, f"FAILED {role['id']}: {err}")
                 # Update flow state to failed
-                manifest = update_flow_state(run_id, manifest, failed_state)
+                manifest = update_flow_state(run_id, manifest, FLOW_STATE_FAILED)
                 raise SystemExit(err)
             continue
 
         if status and status.get("state") == "failed":
             log_line(run_id, f"HALT: {role['id']} failed: {status.get('error')}")
             # Update flow state to failed
-            manifest = update_flow_state(run_id, manifest, failed_state)
+            manifest = update_flow_state(run_id, manifest, FLOW_STATE_FAILED)
             raise SystemExit(f"Role failed: {role['id']}")
 
         if status and status.get("state") == "running":
@@ -350,14 +344,14 @@ def orchestrate(run_id: str):
         manifest["current_role"] = role["id"]
         manifest["last_spawned_at"] = dt.datetime.now(dt.UTC).isoformat()
         # Update flow state to "running" when spawning first role
-        if manifest.get("flow_state") == pending_state:
-            manifest = update_flow_state(run_id, manifest, running_state)
+        if manifest.get("flow_state") == FLOW_STATE_PENDING:
+            manifest = update_flow_state(run_id, manifest, FLOW_STATE_RUNNING)
         save_manifest(run_id, manifest)
         log_line(run_id, f"SPAWN: {role['id']} -> {agent_dir}")
         return
 
     # All roles completed - update flow state
-    manifest = update_flow_state(run_id, manifest, completed_state)
+    manifest = update_flow_state(run_id, manifest, FLOW_STATE_COMPLETED)
     log_line(run_id, "DONE: all roles completed")
 
 
