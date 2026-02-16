@@ -39,7 +39,9 @@ Valid transitions:
 
 ### Terminal States
 
-- **ARCHIVED**: No further transitions allowed
+- **COMPLETED**: Semi-terminal; the only allowed transition is to `ARCHIVED`
+- **FAILED**: Semi-terminal; the only allowed transition is to `ARCHIVED`
+- **ARCHIVED**: Fully terminal; no further transitions allowed
 
 ## Role State Machine
 
