@@ -136,7 +136,9 @@ The state machine is integrated into the existing pipeline orchestration:
 2. **Orchestration Start** (`orchestrate`): Flow transitions to `PENDING`, then `RUNNING`
 3. **Role Execution**: Each role follows its own state machine
 4. **Completion**: Flow transitions to `COMPLETED` or `FAILED`
-5. **Archival**: After PR creation or failure recording, flow transitions to `ARCHIVED`
+5. **Archival**: _Future enhancement_ - After PR creation or failure recording, flow will transition to `ARCHIVED`
+
+**Note**: The `ARCHIVED` state is defined in the state machine for future use but not yet integrated into the pipeline commands. This allows for future enhancements without breaking changes.
 
 ## Benefits
 
