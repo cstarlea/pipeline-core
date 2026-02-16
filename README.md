@@ -15,6 +15,7 @@ This repo hosts a deterministic, script-driven pipeline for project work. LLMs a
 - `orchestration/` — run packets, briefs, checklists
 - `roster/` — role definitions + approval rules
 - `runs/` — run artifacts (gitignored)
+- `agents/` — per-run agent workspaces (inbox/outbox/status)
 
 ## Quick start
 ```bash
