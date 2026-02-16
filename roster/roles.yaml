@@ -1,0 +1,27 @@
+version: 1
+project: starleaf.online.static
+roles:
+  - id: astro-specialist
+    output: 01-architecture.md
+    focus: Astro architecture, content collections, routing
+  - id: typescript-specialist
+    output: 02-implementation.md
+    focus: Type safety, generics, strictness
+  - id: dependency-management-specialist
+    output: 03-data-notes.md
+    focus: Dependency audit, security updates (if applicable)
+  - id: code-review-specialist
+    output: 04-qa-report.md
+    focus: Code quality + risk assessment
+  - id: readme-specialist
+    output: 05-release-notes.md
+    focus: Docs/README/release notes
+approval:
+  checklist_required: true
+  required_outputs:
+    - 01-architecture.md
+    - 02-implementation.md
+    - 03-data-notes.md
+    - 04-qa-report.md
+    - 05-release-notes.md
+    - FINAL.md

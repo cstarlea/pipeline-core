@@ -4,6 +4,11 @@ import argparse
 import datetime as dt
 from pathlib import Path
 
+try:
+    import yaml
+except Exception:
+    yaml = None
+
 ROLES = {
     "architect": {"responsibilities": "Define architecture changes, contracts, non-goals.", "output": "01-architecture.md"},
     "builder": {"responsibilities": "Implement approved scope (code/config).", "output": "02-implementation.md"},
@@ -11,6 +16,20 @@ ROLES = {
     "qa": {"responsibilities": "Add/execute tests and report evidence.", "output": "04-qa-report.md"},
     "docs": {"responsibilities": "Update README/runbook/release notes.", "output": "05-release-notes.md"},
 }
+
+def load_roles(base: Path):
+    roster = base.parent / "roster" / "roles.yaml"
+    if yaml and roster.exists():
+        data = yaml.safe_load(roster.read_text()) or {}
+        roles = {}
+        for r in data.get("roles", []):
+            roles[r["id"]] = {
+                "responsibilities": r.get("focus", ""),
+                "output": r["output"],
+            }
+        if roles:
+            return roles
+    return ROLES
 
 
 def render(template: str, values: dict[str, str]) -> str:
@@ -40,7 +59,8 @@ def create_run(base: Path, objective: str, criteria: list[str], scope: str, run_
         f"{scope}\n"
     )
 
-    for role, meta in ROLES.items():
+    roles = load_roles(base)
+    for role, meta in roles.items():
         content = render(template, {
             "role": role,
             "run_id": run_id,

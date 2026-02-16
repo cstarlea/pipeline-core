@@ -98,6 +98,14 @@ def main():
             "05-release-notes.md",
             "FINAL.md",
         ]
+        roster = ROOT / "roster" / "roles.yaml"
+        if roster.exists():
+            try:
+                import yaml
+                data = yaml.safe_load(roster.read_text()) or {}
+                required = data.get("approval", {}).get("required_outputs", required)
+            except Exception:
+                pass
         missing = [f for f in required if not (run_dir / f).exists()]
         if missing:
             raise SystemExit(f"Missing required outputs: {', '.join(missing)}")

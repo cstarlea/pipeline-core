@@ -13,6 +13,7 @@ This repo hosts a deterministic, script-driven pipeline for project work. LLMs a
 - `tasks/` — task contract templates
 - `scripts/` — pipeline runner
 - `orchestration/` — run packets, briefs, checklists
+- `roster/` — role definitions + approval rules
 - `runs/` — run artifacts (gitignored)
 
 ## Quick start
