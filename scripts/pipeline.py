@@ -376,6 +376,41 @@ def run_gates(run_id: str):
 
 
 
+def status(run_id: str):
+    """Display the current status of a run including flow state and role states."""
+    manifest = load_manifest(run_id)
+    run_dir = ORCH_RUNS / run_id
+    
+    print(f"Run ID: {run_id}")
+    print(f"Flow State: {manifest.get('flow_state', 'unknown')}")
+    print(f"Current Role: {manifest.get('current_role', 'none')}")
+    print(f"Last Spawned: {manifest.get('last_spawned_at', 'never')}")
+    print()
+    
+    # Show role states if roster exists
+    roster = load_roster()
+    roles = roster.get("roles", [])
+    
+    if roles:
+        print("Role States:")
+        for role in roles:
+            agent_dir = AGENTS / run_id / role["id"]
+            if agent_dir.exists():
+                role_status = load_status(agent_dir)
+                if role_status:
+                    state = role_status.get("state", "unknown")
+                    started = role_status.get("started", "N/A")
+                    completed = role_status.get("completed", "N/A")
+                    error = role_status.get("error", "")
+                    print(f"  {role['id']:30s} {state:10s} started={started} completed={completed}")
+                    if error:
+                        print(f"    Error: {error}")
+                else:
+                    print(f"  {role['id']:30s} {'no status':10s}")
+            else:
+                print(f"  {role['id']:30s} {'not created':10s}")
+
+
 def pr_comment(run_id: str):
     task_path = RUNS / run_id / "task.yaml"
     if not task_path.exists():
@@ -451,6 +486,9 @@ def main():
 
     g = sp.add_parser("gates")
     g.add_argument("--run-id", required=True)
+    
+    s = sp.add_parser("status")
+    s.add_argument("--run-id", required=True)
 
     args = p.parse_args()
 
@@ -562,6 +600,10 @@ def main():
 
     if args.cmd == "gates":
         run_gates(args.run_id)
+        return
+    
+    if args.cmd == "status":
+        status(args.run_id)
         return
 
 
