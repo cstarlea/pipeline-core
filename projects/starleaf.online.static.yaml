@@ -5,6 +5,6 @@ default_branch: main
 autopr: true
 deploy: manual_komodo
 model_policy: subagent_policy
-build:
+gates:
   commands: []
-  notes: "Static site repo; add build steps if needed."
+  notes: "Add deterministic test/build commands if needed."
