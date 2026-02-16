@@ -207,6 +207,20 @@ def spawn_role(role: dict, run_dir: Path):
     write_instructions(agent_dir, role, run_dir)
     update_status(agent_dir, "pending")
 
+    # Include project path (from task.yaml) and agent workspace in scope
+    project_path = None
+    task_path = RUNS / run_dir.name / "task.yaml"
+    if task_path.exists():
+        try:
+            task = load_yaml(task_path)
+            project_path = task.get("path")
+        except Exception:
+            project_path = None
+
+    scope_paths = [str(run_dir), str(agent_dir)]
+    if project_path:
+        scope_paths.append(str(project_path))
+
     prompt = f"""You are a role-specific subagent.
 
 ROLE: {role['id']}
@@ -214,7 +228,7 @@ RUN_ID: {run_dir.name}
 OBJECTIVE: Write the role output for this run.
 
 SCOPE:
-- Allowed files/paths: {run_dir}
+- Allowed files/paths: {', '.join(scope_paths)}
 - Do not touch anything else.
 
 DELIVERABLES (required):
