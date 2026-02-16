@@ -1,0 +1,3 @@
+# This directory stores run artifacts (gitignored)
+# Each run creates a subdirectory: runs/<run-id>/
+# See README.md for more details.

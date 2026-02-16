@@ -6,6 +6,7 @@ import datetime as dt
 import json
 from pathlib import Path
 import subprocess
+import sys
 import time
 import yaml
 
@@ -17,8 +18,46 @@ ORCH_LOGS = ORCH / "logs"
 AGENTS = ROOT / "agents"
 ROSTER = ROOT / "roster" / "roles.yaml"
 
+# Add orchestration to path for imports
+sys.path.insert(0, str(ROOT))
+
+try:
+    from orchestration.flow_state_machine import FlowStateMachine, FlowState, RoleStateMachine, RoleState, StateTransitionError
+except ImportError:
+    # Fallback if state machine not available
+    FlowStateMachine = None
+    FlowState = None
+    RoleStateMachine = None
+    RoleState = None
+    StateTransitionError = None
+
 
 MANIFESTS = ROOT / "manifests"
+
+# State machine constants - fallback values when state machine module is not available
+# When FlowState/RoleState are available, use enum values instead
+TERMINAL_FLOW_STATES = (
+    {FlowState.FAILED.value, FlowState.COMPLETED.value, FlowState.ARCHIVED.value}
+    if FlowState
+    else {"failed", "completed", "archived"}
+)
+
+# Build role state enum mapping if available
+_ROLE_STATE_ENUM_MAP = None
+if RoleState:
+    _ROLE_STATE_ENUM_MAP = {
+        "pending": RoleState.PENDING,
+        "running": RoleState.RUNNING,
+        "completed": RoleState.COMPLETED,
+        "failed": RoleState.FAILED,
+    }
+
+# Flow state values as module constants to avoid recreation
+FLOW_STATE_CREATED = FlowState.CREATED.value if FlowState else "created"
+FLOW_STATE_PENDING = FlowState.PENDING.value if FlowState else "pending"
+FLOW_STATE_RUNNING = FlowState.RUNNING.value if FlowState else "running"
+FLOW_STATE_COMPLETED = FlowState.COMPLETED.value if FlowState else "completed"
+FLOW_STATE_FAILED = FlowState.FAILED.value if FlowState else "failed"
 
 
 def manifest_path(run_id: str) -> Path:
@@ -30,12 +69,38 @@ def load_manifest(run_id: str) -> dict:
     mp = manifest_path(run_id)
     if mp.exists():
         return json.loads(mp.read_text())
-    return {"run_id": run_id, "current_role": None, "last_spawned_at": None}
+    
+    return {
+        "run_id": run_id,
+        "current_role": None,
+        "last_spawned_at": None,
+        "flow_state": FLOW_STATE_CREATED,  # Track flow state
+    }
 
 
 def save_manifest(run_id: str, data: dict):
     mp = manifest_path(run_id)
     mp.write_text(json.dumps(data, indent=2))
+
+
+def update_flow_state(run_id: str, manifest: dict, new_state: str) -> dict:
+    """
+    Update flow state if not already in terminal states.
+    
+    Args:
+        run_id: The run identifier
+        manifest: The current manifest dict
+        new_state: The new flow state
+        
+    Returns:
+        Updated manifest
+    """
+    current_state = manifest.get("flow_state")
+    if current_state not in TERMINAL_FLOW_STATES and current_state != new_state:
+        manifest["flow_state"] = new_state
+        save_manifest(run_id, manifest)
+        log_line(run_id, f"FLOW STATE: {current_state} -> {new_state}")
+    return manifest
 
 
 def log_line(run_id: str, message: str):
@@ -112,6 +177,21 @@ def load_status(agent_dir: Path):
 def update_status(agent_dir: Path, state: str, error: str | None = None):
     status_path = agent_dir / "status.json"
     status = load_status(agent_dir) or {}
+    old_state = status.get("state", "pending")
+    run_id = status.get("run_id", "unknown")
+    
+    # Validate state transition using state machine if available
+    if _ROLE_STATE_ENUM_MAP:
+        try:
+            if old_state in _ROLE_STATE_ENUM_MAP and state in _ROLE_STATE_ENUM_MAP:
+                sm = RoleStateMachine(initial_state=_ROLE_STATE_ENUM_MAP[old_state])
+                if not sm.can_transition(_ROLE_STATE_ENUM_MAP[state]):
+                    # Log warning but proceed - validation is advisory for backward compatibility
+                    log_line(run_id, f"WARNING: Invalid role state transition {old_state} -> {state}")
+        except (StateTransitionError, KeyError, AttributeError) as e:
+            # Log specific errors but don't fail - fallback to old behavior
+            log_line(run_id, f"State machine validation error: {e}")
+    
     status["state"] = state
     status["error"] = error
     if state == "running":
@@ -119,6 +199,7 @@ def update_status(agent_dir: Path, state: str, error: str | None = None):
     if state in ("completed", "failed"):
         status["completed"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     status_path.write_text(json.dumps(status, indent=2))
+
 
 
 def spawn_role(role: dict, run_dir: Path):
@@ -222,6 +303,10 @@ def orchestrate(run_id: str):
     roster = load_roster()
     roles = roster.get("roles", [])
     manifest = load_manifest(run_id)
+    
+    # Update flow state from "created" to "pending" on first orchestrate call
+    if manifest.get("flow_state") == FLOW_STATE_CREATED:
+        manifest = update_flow_state(run_id, manifest, FLOW_STATE_PENDING)
 
     running_roles = []
     for role in roles:
@@ -234,6 +319,7 @@ def orchestrate(run_id: str):
         log_line(run_id, f"ERROR: Multiple roles running: {', '.join(running_roles)}")
         raise SystemExit("Multiple roles running; aborting orchestrate.")
 
+    # Check if any role failed - update flow state
     for role in roles:
         agent_dir = AGENTS / run_id / role["id"]
         status = load_status(agent_dir) if agent_dir.exists() else None
@@ -243,11 +329,15 @@ def orchestrate(run_id: str):
             if not ok:
                 update_status(agent_dir, "failed", err)
                 log_line(run_id, f"FAILED {role['id']}: {err}")
+                # Update flow state to failed
+                manifest = update_flow_state(run_id, manifest, FLOW_STATE_FAILED)
                 raise SystemExit(err)
             continue
 
         if status and status.get("state") == "failed":
             log_line(run_id, f"HALT: {role['id']} failed: {status.get('error')}")
+            # Update flow state to failed
+            manifest = update_flow_state(run_id, manifest, FLOW_STATE_FAILED)
             raise SystemExit(f"Role failed: {role['id']}")
 
         if status and status.get("state") == "running":
@@ -258,10 +348,15 @@ def orchestrate(run_id: str):
         agent_dir = spawn_role(role, run_dir)
         manifest["current_role"] = role["id"]
         manifest["last_spawned_at"] = dt.datetime.now(dt.UTC).isoformat()
+        # Update flow state to "running" when spawning first role
+        if manifest.get("flow_state") == FLOW_STATE_PENDING:
+            manifest = update_flow_state(run_id, manifest, FLOW_STATE_RUNNING)
         save_manifest(run_id, manifest)
         log_line(run_id, f"SPAWN: {role['id']} -> {agent_dir}")
         return
 
+    # All roles completed - update flow state
+    manifest = update_flow_state(run_id, manifest, FLOW_STATE_COMPLETED)
     log_line(run_id, "DONE: all roles completed")
 
 
@@ -311,6 +406,41 @@ def run_gates(run_id: str):
     for cmd in project_cfg.get("gates", {}).get("commands", []):
         subprocess.run(cmd, shell=True, check=True, cwd=project_path)
 
+
+
+def status(run_id: str):
+    """Display the current status of a run including flow state and role states."""
+    manifest = load_manifest(run_id)
+    run_dir = ORCH_RUNS / run_id
+    
+    print(f"Run ID: {run_id}")
+    print(f"Flow State: {manifest.get('flow_state', 'unknown')}")
+    print(f"Current Role: {manifest.get('current_role', 'none')}")
+    print(f"Last Spawned: {manifest.get('last_spawned_at', 'never')}")
+    print()
+    
+    # Show role states if roster exists
+    roster = load_roster()
+    roles = roster.get("roles", [])
+    
+    if roles:
+        print("Role States:")
+        for role in roles:
+            agent_dir = AGENTS / run_id / role["id"]
+            if agent_dir.exists():
+                role_status = load_status(agent_dir)
+                if role_status:
+                    state = role_status.get("state", "unknown")
+                    started = role_status.get("started", "N/A")
+                    completed = role_status.get("completed", "N/A")
+                    error = role_status.get("error", "")
+                    print(f"  {role['id']:30s} {state:10s} started={started} completed={completed}")
+                    if error:
+                        print(f"    Error: {error}")
+                else:
+                    print(f"  {role['id']:30s} {'no status':10s}")
+            else:
+                print(f"  {role['id']:30s} {'not created':10s}")
 
 
 def pr_comment(run_id: str):
@@ -388,6 +518,9 @@ def main():
 
     g = sp.add_parser("gates")
     g.add_argument("--run-id", required=True)
+    
+    s = sp.add_parser("status")
+    s.add_argument("--run-id", required=True)
 
     args = p.parse_args()
 
@@ -499,6 +632,10 @@ def main():
 
     if args.cmd == "gates":
         run_gates(args.run_id)
+        return
+    
+    if args.cmd == "status":
+        status(args.run_id)
         return
 
 
